@@ -734,6 +734,11 @@ async function nitroFetchRaw(
 
   try {
     const res: NitroResponseNative = await client.request(req);
+    // Native cancellation is best-effort — cancel() is a no-op once the
+    // response is buffered, so an aborted request can still resolve here.
+    if (signal?.aborted) {
+      throw createAbortError();
+    }
     if (inspectorId) {
       NetworkInspector._recordEnd(
         inspectorId,

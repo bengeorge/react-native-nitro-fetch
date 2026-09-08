@@ -531,6 +531,30 @@ describe('NitroFetch - AbortController', () => {
     expect(elapsed).toBeLessThan(5000);
   });
 
+  it('abort after the response is buffered still rejects', async () => {
+    const controller = new AbortController();
+    const pending = nitroFetch(`${BASE}/get`, { signal: controller.signal });
+
+    // Block the JS thread so native finishes while the continuation cannot run,
+    // then abort inside that window — cancel() is already a no-op by then.
+    const until = Date.now() + 1500;
+    let spins = 0;
+    while (Date.now() < until) {
+      spins += 1;
+    }
+    expect(spins).toBeGreaterThan(0);
+    controller.abort();
+
+    let threw = false;
+    try {
+      await pending;
+    } catch (e: any) {
+      threw = true;
+      expect(e.name).toBe('AbortError');
+    }
+    expect(threw).toBe(true);
+  });
+
   it('normal fetch with signal (not aborted) succeeds', async () => {
     const controller = new AbortController();
     const res = await nitroFetch(`${BASE}/get`, {
