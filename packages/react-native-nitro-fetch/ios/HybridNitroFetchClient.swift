@@ -376,7 +376,10 @@ final class HybridNitroFetchClient: HybridNitroFetchClientSpec {
       if let fileUri = part.fileUri {
         let fileName = escapeMultipartParameter(part.fileName ?? "file")
         let mimeType = part.mimeType ?? "application/octet-stream"
-        guard !mimeType.contains("\r"), !mimeType.contains("\n") else {
+        // String.contains(_:) matches grapheme clusters, and CRLF is a single
+        // cluster — so contains("\r") is false for "a\r\nb", the exact shape a
+        // header-injection payload takes. Scan unicode scalars instead.
+        guard !mimeType.unicodeScalars.contains(where: { $0 == "\r" || $0 == "\n" }) else {
           throw NSError(domain: "NitroFetch", code: -5,
                         userInfo: [NSLocalizedDescriptionKey: "Multipart MIME type must not contain line breaks"])
         }

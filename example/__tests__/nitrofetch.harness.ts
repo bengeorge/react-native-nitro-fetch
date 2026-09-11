@@ -260,9 +260,10 @@ describe('NitroFetch - Request Body Types', () => {
     expect(body.form.multiline).toBe('line1\r\nline2');
   });
 
-  // The server percent-decodes filename (but not name), so an escaped filename
-  // round-trips; an unescaped quote truncates it at the quote instead.
-  it('FormData filename with a quote survives the round trip', async () => {
+  // Per the WHATWG multipart/form-data algorithm a quote is escaped as %22 and
+  // must not be further escaped; receivers do not decode it. So the server sees
+  // the literal %22 — an unescaped quote would make it drop the part entirely.
+  it('FormData filename with a quote is percent-escaped on the wire', async () => {
     const fd = new FormData();
     fd.append('photo', {
       uri: image,
@@ -271,7 +272,7 @@ describe('NitroFetch - Request Body Types', () => {
     } as any);
     const res = await nitroFetch(`${BASE}/post`, { method: 'POST', body: fd });
     const body = await res.json();
-    expect(body.fileNames.photo).toBe('na"me.jpg');
+    expect(body.fileNames.photo).toBe('na%22me.jpg');
   });
 
   it('FormData file MIME type with a line break rejects', async () => {
