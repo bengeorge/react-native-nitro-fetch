@@ -841,8 +841,40 @@ async function nitroStreamFetch(
     let responseResolved = false;
     let streamBytesReceived = 0;
 
+    // A late abort can land after native has already delivered the response.
+    // cancel() is a documented no-op by then, so onCanceled never fires and
+    // these callbacks have to settle the promise themselves — otherwise the
+    // fetch hangs forever instead of rejecting.
+    let abortSettled = false;
+    const settleAborted = () => {
+      if (abortSettled) return;
+      abortSettled = true;
+      cleanupAbortListener();
+      if (inspectorId) {
+        NetworkInspector._recordEnd(
+          inspectorId,
+          0,
+          '',
+          [],
+          0,
+          'Request aborted'
+        );
+      }
+      const err = createAbortError();
+      if (!responseResolved) {
+        responseResolved = true;
+        rejectResponse(err);
+      } else {
+        streamController.error(err);
+      }
+    };
+
     builder.onResponseStarted((info) => {
-      if (responseResolved || signal?.aborted) return;
+      if (responseResolved) return;
+      if (signal?.aborted) {
+        settleAborted();
+        return;
+      }
       responseResolved = true;
       const status = info.httpStatusCode;
       const responseHeaders = new NitroHeaders(
@@ -877,6 +909,10 @@ async function nitroStreamFetch(
     builder.onSucceeded((_info) => {
       cleanupAbortListener();
       if (streamCancelled) return;
+      if (signal?.aborted) {
+        settleAborted();
+        return;
+      }
       streamController.close();
       if (inspectorId) {
         const info = _info as any;
@@ -935,8 +971,12 @@ async function nitroStreamFetch(
         try {
           request.cancel();
         } catch {
-          return;
+          // Request may already be torn down — swallow and settle anyway.
         }
+        // Settle here rather than waiting for onCanceled: once native has
+        // finished the request, cancel() is a no-op and no further callback
+        // arrives, which used to leave this promise pending forever.
+        settleAborted();
       };
       signal.addEventListener('abort', abortListener, { once: true });
     }

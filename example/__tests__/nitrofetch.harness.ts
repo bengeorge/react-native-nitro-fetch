@@ -647,6 +647,40 @@ describe('NitroFetch - Streaming', () => {
     expect(threw).toBe(true);
   });
 
+  it('aborting while the response callback is queued still settles', async () => {
+    const controller = new AbortController();
+    // /delay/1 so the request is definitely in flight before the JS thread is
+    // blocked — nitroStreamFetch only calls start() after two awaits, so
+    // blocking immediately would just hit the pre-flight abort check instead.
+    const pending = (nitroFetch as any)(`${BASE}/delay/1`, {
+      stream: true,
+      signal: controller.signal,
+    });
+    await new Promise((r) => setTimeout(r, 100));
+
+    // Now block long enough for the response to arrive and the request to
+    // complete natively, queueing onResponseStarted + onSucceeded behind the
+    // blocked thread. Aborting in that window makes cancel() a no-op.
+    const until = Date.now() + 2000;
+    let spins = 0;
+    while (Date.now() < until) {
+      spins += 1;
+    }
+    expect(spins).toBeGreaterThan(0);
+    controller.abort();
+
+    // A never-settling promise would hang the whole suite, so race a timeout
+    // and assert on the outcome instead.
+    const outcome = await Promise.race([
+      pending.then(
+        () => 'resolved',
+        (e: any) => e?.name ?? 'rejected'
+      ),
+      new Promise((r) => setTimeout(() => r('hung'), 3000)),
+    ]);
+    expect(outcome).toBe('AbortError');
+  });
+
   // The server drips for 10s. Polling stops the moment it records either
   // outcome, so a request that drains to completion fails fast rather than
   // burning the whole budget. Cronet can take a few seconds to close the
